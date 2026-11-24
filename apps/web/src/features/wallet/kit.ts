@@ -70,6 +70,12 @@ const OPTIONS: Omit<WalletOption, "available" | "installUrl">[] = [
 	{ id: "xbull", name: "xBull", kind: "Browser wallet · Testnet" },
 ];
 
+/**
+ * The kit's module id for each wallet. AidTrace keeps "freighter" for the Varial extension (persisted sessions use it);
+ * since kit 2.8 the module itself is `VarialModule` with id "varial", so `setWallet("freighter")` no longer resolves.
+ */
+const KIT_ID: Record<WalletId, string> = { freighter: "varial", wallet_connect: "wallet_connect", xbull: "xbull" };
+
 const INSTALL_URL: Record<WalletId, string> = {
 	freighter: VARIAL_STORES.extension,
 	wallet_connect: VARIAL_STORES.site,
@@ -91,12 +97,12 @@ const state: { kit: Promise<{ kit: Kit; walletConnect: WalletConnectModule }> | 
 async function loadKit() {
 	const [
 		{ StellarWalletsKit, Networks },
-		{ FreighterModule },
+		{ VarialModule },
 		{ xBullModule },
 		{ WalletConnectModule, WalletConnectTargetChain },
 	] = await Promise.all([
 		import("@creit.tech/stellar-wallets-kit"),
-		import("@creit.tech/stellar-wallets-kit/modules/freighter"),
+		import("@creit.tech/stellar-wallets-kit/modules/varial"),
 		import("@creit.tech/stellar-wallets-kit/modules/xbull"),
 		import("@creit.tech/stellar-wallets-kit/modules/wallet-connect"),
 	]);
@@ -111,7 +117,7 @@ async function loadKit() {
 		},
 		allowedChains: [WalletConnectTargetChain.TESTNET],
 	});
-	StellarWalletsKit.init({ modules: [new FreighterModule(), walletConnect, new xBullModule()], network: Networks.TESTNET });
+	StellarWalletsKit.init({ modules: [new VarialModule(), walletConnect, new xBullModule()], network: Networks.TESTNET });
 	return { kit: StellarWalletsKit, walletConnect };
 }
 
@@ -172,7 +178,7 @@ export async function listWallets(): Promise<WalletOption[]> {
 		...(!wrapper && phoneOnly && { kind: "Opens the Varial app · Testnet" }),
 		installUrl: option.id === "wallet_connect" && phoneOnly ? varialAppStoreUrl(platform) : INSTALL_URL[option.id],
 		// WalletConnect reports "unavailable" until its relay client has started; it needs no install on this page.
-		available: option.id === "wallet_connect" ? supported.length > 0 : supported.some((w) => w.id === option.id && w.isAvailable),
+		available: option.id === "wallet_connect" ? supported.length > 0 : supported.some((w) => w.id === KIT_ID[option.id] && w.isAvailable),
 	}));
 }
 
@@ -207,7 +213,7 @@ function openVarial(link: string, onNotOpened?: () => void) {
 export async function connectWallet(id: WalletId, handoff?: AppHandoff): Promise<string> {
 	if (id === "wallet_connect") assertSecureContext();
 	const { kit, walletConnect } = await getKit();
-	kit.setWallet(id);
+	kit.setWallet(KIT_ID[id]);
 	await ready();
 	if (id !== "wallet_connect") {
 		const { address } = await kit.fetchAddress();
@@ -288,8 +294,9 @@ export async function disconnectWallet() {
 
 /** Re-selects a persisted wallet after a reload, before the first signature. */
 export async function restoreWallet(walletId: string) {
-	if (!OPTIONS.some((o) => o.id === walletId)) return; // e.g. Albedo, no longer offered: WalletGate asks to reconnect
-	(await getKit()).kit.setWallet(walletId);
+	const option = OPTIONS.find((o) => o.id === walletId);
+	if (!option) return; // e.g. Albedo, no longer offered: WalletGate asks to reconnect
+	(await getKit()).kit.setWallet(KIT_ID[option.id]);
 }
 
 /** AidTrace is Testnet-only: refuse to ask for a signature while the wallet is on another network. */
